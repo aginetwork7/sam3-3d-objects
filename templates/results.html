@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Results Preview - Original Image & PLY Point Cloud</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    header { text-align: center; margin-bottom: 16px; }
+    header h1 { font-size: 1.6rem; margin: 0; }
+    .grid { display: grid; grid-template-columns: 380px 1fr; gap: 16px; align-items: start; }
+    .card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; overflow: hidden; }
+    .card h2 { font-size: 1rem; margin: 0; padding: 12px 14px; background: rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .img-wrap { padding: 12px; text-align: center; }
+    .img-wrap img { max-width: 100%; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); }
+    .viewer { position: relative; height: 70vh; min-height: 480px; }
+    #canvas-container { width: 100%; height: 100%; position: relative; }
+    #canvas-container canvas { width: 100%; height: 100%; display: block; }
+    .loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; display: none; }
+    .loading.active { display: block; }
+    .spinner { width: 40px; height: 40px; border: 3px solid rgba(0, 217, 255, 0.3); border-top-color: #00d9ff; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 10px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .panel { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px; font-size: 12px; }
+    .panel .row { margin: 4px 0; color: #94a3b8; }
+    .panel .row span { color: #7dd3fc; }
+    .controls { position: absolute; top: 10px; right: 10px; display: flex; gap: 8px; }
+    .btn { background: rgba(0,0,0,0.55); color: #e2e8f0; border: 1px solid rgba(255,255,255,0.12); padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+    .range { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 8px; }
+    .range label { font-size: 12px; color: #94a3b8; margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Results Preview</h1>
+      <p>Left: Original Image, Right: Point Cloud</p>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Original Image</h2>
+        <div class="img-wrap">
+          <img id="originalImage" src="{{ original_image or '' }}" alt="Original Image">
+        </div>
+      </div>
+
+      <div class="card viewer">
+        <h2>PLY Point Cloud Viewer</h2>
+        <div id="canvas-container">
+          <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <div id="loadingText" style="color:#94a3b8;">Loading Point Cloud...</div>
+          </div>
+        </div>
+        <div class="panel" id="infoPanel" style="display:none;">
+          <div class="row">Filename: <span id="fileName">-</span></div>
+          <div class="row">Point Count: <span id="pointCount">-</span></div>
+        </div>
+        <div class="controls">
+          <button class="btn" onclick="resetCamera()">Reset Camera</button>
+          <button class="btn" onclick="toggleAutoRotate()">Auto Rotate</button>
+        </div>
+        <div class="range">
+          <label>Point Size: <span id="pointSizeValue">3</span></label>
+          <input type="range" id="pointSize" min="1" max="10" step="0.5" value="3">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script>
+    // Pull values from server-rendered vars or query params
+  // Use tojson to safely embed strings (handles quotes and special chars)
+  const SERVER_PLY = {{ (ply_url or '') | tojson }};
+  const SERVER_IMG = {{ (original_image or '') | tojson }};
+
+    function getParam(name) {
+      const p = new URLSearchParams(window.location.search).get(name);
+      return p && p.trim() ? p.trim() : '';
+    }
+
+    const PLY_URL = SERVER_PLY || getParam('ply') || getParam('ply_url');
+    const IMG_URL = SERVER_IMG || getParam('img') || getParam('original_image');
+    if (IMG_URL) {
+      document.getElementById('originalImage').src = IMG_URL;
+    }
+
+    let scene, camera, renderer, controls, pointCloud; let autoRotate = false;
+
+    function parsePLY(data) {
+      // Minimal parser: header scan + binary/ASCII support, with color per ply_index.html approach
+      const result = { vertices: [], colors: [] };
+      const dv = new DataView(data);
+      const dec = new TextDecoder('ascii');
+      const headText = dec.decode(new Uint8Array(data, 0, Math.min(data.byteLength, 8192)));
+      const endIdx = headText.indexOf('end_header');
+      if (endIdx === -1) throw new Error('Invalid PLY: no end_header');
+      let headerEnd = endIdx + 'end_header'.length;
+      while (headerEnd < data.byteLength) { const b = dv.getUint8(headerEnd); if (b === 10 || b === 13) headerEnd++; else break; }
+      const header = headText.substring(0, endIdx);
+      const lines = header.split('\n').map(l => l.trim()).filter(Boolean);
+      let isBinary = false, little = true, vertexCount = 0, inVertex = false; const properties = [];
+      for (const line of lines) {
+        if (line.startsWith('format ascii')) { isBinary = false; }
+        else if (line.startsWith('format binary_little_endian')) { isBinary = true; little = true; }
+        else if (line.startsWith('format binary_big_endian')) { isBinary = true; little = false; }
+        else if (line.startsWith('element vertex')) { vertexCount = parseInt(line.split(' ')[2]); inVertex = true; }
+        else if (line.startsWith('element ')) { inVertex = false; }
+        else if (line.startsWith('property') && inVertex) { const [_, type, name] = line.split(/\s+/); properties.push({ type, name }); }
+      }
+
+      const propIndex = {}; properties.forEach((p,i)=>propIndex[p.name]=i);
+      const hasSH = propIndex.f_dc_0 !== undefined && propIndex.f_dc_1 !== undefined && propIndex.f_dc_2 !== undefined;
+      const hasRGB = (propIndex.red !== undefined) || (propIndex.r !== undefined) || (propIndex.diffuse_red !== undefined) || (propIndex.color_red !== undefined);
+
+      if (isBinary) {
+        let offset = headerEnd;
+        for (let i=0;i<vertexCount;i++) {
+          const v = {};
+          for (const prop of properties) {
+            let val; switch (prop.type) {
+              case 'float': case 'float32': val = dv.getFloat32(offset, little); offset+=4; break;
+              case 'double': case 'float64': val = dv.getFloat64(offset, little); offset+=8; break;
+              case 'int': case 'int32': val = dv.getInt32(offset, little); offset+=4; break;
+              case 'uint': case 'uint32': val = dv.getUint32(offset, little); offset+=4; break;
+              case 'short': case 'int16': val = dv.getInt16(offset, little); offset+=2; break;
+              case 'ushort': case 'uint16': val = dv.getUint16(offset, little); offset+=2; break;
+              case 'char': case 'int8': val = dv.getInt8(offset); offset+=1; break;
+              case 'uchar': case 'uint8': val = dv.getUint8(offset); offset+=1; break;
+              default: val = dv.getFloat32(offset, little); offset+=4;
+            }
+            v[prop.name] = val;
+          }
+          result.vertices.push(v.x ?? v.X ?? 0, v.y ?? v.Y ?? 0, v.z ?? v.Z ?? 0);
+          if (hasSH) {
+            const C0 = 0.28209479177387814; let r=0.5+C0*(v.f_dc_0||0), g=0.5+C0*(v.f_dc_1||0), b=0.5+C0*(v.f_dc_2||0);
+            r=Math.max(0,Math.min(1,r)); g=Math.max(0,Math.min(1,g)); b=Math.max(0,Math.min(1,b)); result.colors.push(r,g,b);
+          } else if (hasRGB) {
+            let r = v.red ?? v.r ?? v.diffuse_red ?? v.color_red ?? 255;
+            let g = v.green ?? v.g ?? v.diffuse_green ?? v.color_green ?? 255;
+            let b = v.blue ?? v.b ?? v.diffuse_blue ?? v.color_blue ?? 255;
+            if (r>1||g>1||b>1){ r/=255; g/=255; b/=255; }
+            result.colors.push(r,g,b);
+          }
+        }
+      } else {
+        const bodyText = new TextDecoder('utf-8').decode(new Uint8Array(data, headerEnd));
+        const rows = bodyText.trim().split('\n');
+        const xI = propIndex.x ?? propIndex.X ?? 0; const yI = propIndex.y ?? propIndex.Y ?? 1; const zI = propIndex.z ?? propIndex.Z ?? 2;
+        for (let i=0;i<Math.min(vertexCount, rows.length);i++) {
+          const vals = rows[i].trim().split(/\s+/).map(Number);
+          result.vertices.push(vals[xI]||0, vals[yI]||0, vals[zI]||0);
+          if (hasSH) {
+            const C0 = 0.28209479177387814; let r=0.5+C0*(vals[propIndex.f_dc_0]||0), g=0.5+C0*(vals[propIndex.f_dc_1]||0), b=0.5+C0*(vals[propIndex.f_dc_2]||0);
+            r=Math.max(0,Math.min(1,r)); g=Math.max(0,Math.min(1,g)); b=Math.max(0,Math.min(1,b)); result.colors.push(r,g,b);
+          } else if (hasRGB) {
+            const rI = propIndex.red ?? propIndex.r ?? propIndex.diffuse_red ?? propIndex.color_red;
+            const gI = propIndex.green ?? propIndex.g ?? propIndex.diffuse_green ?? propIndex.color_green;
+            const bI = propIndex.blue ?? propIndex.b ?? propIndex.diffuse_blue ?? propIndex.color_blue;
+            let r=vals[rI] ?? 255, g=vals[gI] ?? 255, b=vals[bI] ?? 255; if (r>1||g>1||b>1){ r/=255; g/=255; b/=255; }
+            result.colors.push(r,g,b);
+          }
+        }
+      }
+      return result;
+    }
+
+    function initScene() {
+      const container = document.getElementById('canvas-container');
+      scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b1220);
+      camera = new THREE.PerspectiveCamera(60, container.clientWidth/container.clientHeight, 0.1, 1000);
+      camera.position.set(0,0,5);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(container.clientWidth, container.clientHeight); renderer.setPixelRatio(window.devicePixelRatio);
+      container.appendChild(renderer.domElement);
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true; controls.dampingFactor = 0.05; controls.minDistance = 0.1; controls.maxDistance = 100;
+      window.addEventListener('resize', onResize);
+      animate();
+    }
+    function onResize(){ const c=document.getElementById('canvas-container'); camera.aspect=c.clientWidth/c.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(c.clientWidth,c.clientHeight); }
+    function animate(){ requestAnimationFrame(animate); if(autoRotate&&pointCloud){ pointCloud.rotation.y+=0.005; } controls.update(); renderer.render(scene,camera); }
+
+    async function loadPLYFromURL(url) {
+      const loading = document.getElementById('loading');
+      const loadingText = document.getElementById('loadingText');
+      loading.classList.add('active');
+
+      // 设置超时控制，避免无响应时一直等待
+      const controller = new AbortController();
+      const timeoutMs = 120000; // 120s 超时
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const resp = await fetch(url, { mode: 'cors', signal: controller.signal });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+        // 流式读取以显示下载进度
+        const contentLengthHeader = resp.headers.get('content-length');
+        const total = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
+        const reader = resp.body?.getReader ? resp.body.getReader() : null;
+        const chunks = [];
+        let received = 0;
+
+        if (reader) {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (!value) continue;
+              chunks.push(value);
+              received += value.byteLength;
+              const receivedMB = (received / (1024 * 1024)).toFixed(2);
+              if (Number.isFinite(total) && total > 0) {
+                const percent = Math.max(0, Math.min(100, Math.round((received / total) * 100)));
+                const totalMB = (total / (1024 * 1024)).toFixed(2);
+                loadingText.textContent = `Downloading... ${percent}% (${receivedMB} MB / ${totalMB} MB)`;
+              } else {
+                loadingText.textContent = `Downloading... ${receivedMB} MB`;
+              }
+            }
+          } catch (streamErr) {
+            console.warn('流式读取中断，退回整包下载:', streamErr);
+          }
+        }
+
+        // 合并分片为单个 ArrayBuffer
+        let buf;
+        if (chunks.length === 1) {
+          buf = chunks[0].buffer.slice(chunks[0].byteOffset, chunks[0].byteOffset + chunks[0].byteLength);
+        } else if (chunks.length > 1) {
+          const totalLen = chunks.reduce((acc, c) => acc + c.byteLength, 0);
+          const merged = new Uint8Array(totalLen);
+          let offset = 0;
+          for (const c of chunks) { merged.set(c, offset); offset += c.byteLength; }
+          buf = merged.buffer;
+        } else {
+          // 流不可用或被中断，直接 arrayBuffer
+          buf = await resp.arrayBuffer();
+          received = buf.byteLength;
+          const receivedMB = (received / (1024 * 1024)).toFixed(2);
+          loadingText.textContent = total > 0
+            ? `Download Complete ${receivedMB} MB`
+            : `Download Complete ${receivedMB} MB (Unknown Total Size)`;
+        }
+
+        let ply;
+        try {
+          loadingText.textContent = 'Parsing Point Cloud...';
+          ply = parsePLY(buf);
+        } catch (parseErr) {
+          console.error('Parse failed, attempting fallback:', parseErr);
+          // 有些服务器可能会 gzip/deflate，或响应带 BOM，尝试再次获取整包
+          const fallbackBuf = await (await fetch(url, { mode: 'cors', signal: controller.signal })).arrayBuffer();
+          ply = parsePLY(fallbackBuf);
+        }
+        if (pointCloud) { scene.remove(pointCloud); pointCloud.geometry.dispose(); pointCloud.material.dispose(); }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(ply.vertices, 3));
+        let material;
+        const sizePx = parseFloat(document.getElementById('pointSize').value) || 3;
+        if (ply.colors.length > 0) { geometry.setAttribute('color', new THREE.Float32BufferAttribute(ply.colors, 3)); material = new THREE.PointsMaterial({ size: sizePx, vertexColors: true, sizeAttenuation: false }); }
+        else {
+          const colors=[]; const pos=ply.vertices; const n=pos.length/3; let minY=Infinity,maxY=-Infinity; for(let i=0;i<n;i++){ const y=pos[i*3+1]; minY=Math.min(minY,y); maxY=Math.max(maxY,y);} for(let i=0;i<n;i++){ const y=pos[i*3+1]; const t=(y-minY)/(maxY-minY||1); const r=Math.sin(t*Math.PI)*0.5+0.5; const g=Math.sin(t*Math.PI+2)*0.5+0.5; const b=Math.sin(t*Math.PI+4)*0.5+0.5; colors.push(r,g,b);} geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors,3)); material=new THREE.PointsMaterial({ size: 0.01, vertexColors: true, sizeAttenuation: true });
+        }
+        // If no colors branch used default material; align with pixel size
+        if (!material) {
+          material = new THREE.PointsMaterial({ size: sizePx, vertexColors: true, sizeAttenuation: false });
+        }
+        pointCloud = new THREE.Points(geometry, material);
+        geometry.computeBoundingBox(); const center = new THREE.Vector3(); geometry.boundingBox.getCenter(center); pointCloud.position.sub(center);
+        const size = new THREE.Vector3(); geometry.boundingBox.getSize(size); const maxDim=Math.max(size.x,size.y,size.z); camera.position.set(0, maxDim*0.5, maxDim*1.5); controls.target.set(0,0,0); controls.update();
+        scene.add(pointCloud);
+        const count = geometry.attributes.position.count; document.getElementById('pointCount').textContent = count.toLocaleString();
+        try { const u=new URL(url, window.location.href); document.getElementById('fileName').textContent = u.pathname.split('/').pop() || 'remote.ply'; } catch { document.getElementById('fileName').textContent='remote.ply'; }
+        document.getElementById('infoPanel').style.display='block';
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          loadingText.textContent = 'Download timed out. Please retry or check network/CORS.';
+        } else {
+          console.error('Failed to load PLY:', err);
+          loadingText.textContent = 'Load failed. Possible CORS issue or invalid link.';
+          alert('Load failed. Possible CORS issue or invalid link.');
+        }
+      } finally {
+        clearTimeout(timeout);
+        // 若渲染成功，关闭 loading；失败则保留提示文本
+        if (pointCloud) {
+          loading.classList.remove('active');
+        }
+      }
+    }
+
+    function resetCamera(){ if(!pointCloud) return; const g=pointCloud.geometry; g.computeBoundingBox(); const s=new THREE.Vector3(); g.boundingBox.getSize(s); const m=Math.max(s.x,s.y,s.z); camera.position.set(0,m*0.5,m*1.5); controls.target.set(0,0,0); controls.update(); }
+    function toggleAutoRotate(){ autoRotate=!autoRotate; }
+
+  document.getElementById('pointSize').addEventListener('input', (e)=>{ const v=parseFloat(e.target.value); document.getElementById('pointSizeValue').textContent=v; if(pointCloud){ pointCloud.material.size = v; }});
+
+    initScene();
+    if (PLY_URL) { loadPLYFromURL(PLY_URL); }
+  </script>
+</body>
+</html>

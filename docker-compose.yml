@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./tmps:/app/tmps
+      # Mount assets if you plan to update models without rebuilding
+      - ./assets:/app/assets 
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_DEBUG=1
+      # Add your FAL_KEY here or in a .env file
+      - FAL_KEY=${321497c2-83ff-487b-b770-b7130137df8d:9e9dd443887f802d1b3402ec7ec5d9da}

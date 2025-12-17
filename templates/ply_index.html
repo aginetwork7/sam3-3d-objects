@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PLY Point Cloud Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 30px 0;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            color: #8892b0;
+            font-size: 1.1rem;
+        }
+
+        .upload-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 40px;
+            margin-bottom: 20px;
+            border: 2px dashed rgba(0, 217, 255, 0.3);
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .upload-section:hover {
+            border-color: rgba(0, 217, 255, 0.6);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .upload-section.drag-over {
+            border-color: #00ff88;
+            background: rgba(0, 255, 136, 0.1);
+        }
+
+        .upload-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+
+        .upload-text {
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            color: #ccd6f6;
+        }
+
+        .upload-hint {
+            color: #8892b0;
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .upload-btn {
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            color: #1a1a2e;
+            border: none;
+            padding: 12px 30px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 217, 255, 0.3);
+        }
+
+        .viewer-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 600px;
+            position: relative;
+        }
+
+        #canvas-container canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 100;
+        }
+
+        .control-btn {
+            background: rgba(0, 0, 0, 0.6);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+
+        .control-btn:hover {
+            background: rgba(0, 217, 255, 0.3);
+            border-color: #00d9ff;
+        }
+
+        .info-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            z-index: 100;
+        }
+
+        .info-panel p {
+            margin: 5px 0;
+            color: #8892b0;
+        }
+
+        .info-panel span {
+            color: #00d9ff;
+            font-weight: 600;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            display: none;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(0, 217, 255, 0.3);
+            border-top-color: #00d9ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .point-size-control {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+
+        .point-size-control label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            color: #8892b0;
+        }
+
+        .point-size-control input[type="range"] {
+            width: 150px;
+            accent-color: #00d9ff;
+        }
+
+        footer {
+            text-align: center;
+            padding: 30px;
+            color: #8892b0;
+            font-size: 0.9rem;
+        }
+
+        .placeholder-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #8892b0;
+        }
+
+        .placeholder-text p {
+            font-size: 1.2rem;
+            margin-bottom: 10px;
+        }
+
+        .url-input {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        .url-field {
+            min-width: 280px;
+            width: min(800px, 80%);
+            padding: 12px 14px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 217, 255, 0.3);
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            outline: none;
+        }
+
+        .url-field::placeholder {
+            color: #8892b0;
+        }
+
+        .proxy-field {
+            min-width: 200px;
+            width: min(600px, 70%);
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px dashed rgba(0, 217, 255, 0.25);
+            background: rgba(0, 0, 0, 0.2);
+            color: #fff;
+            outline: none;
+            font-size: 0.9rem;
+        }
+
+        .proxy-hint {
+            color: #8892b0;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🌐 PLY Point Cloud Viewer</h1>
+            <p>Upload PLY file to view colored point cloud data in 3D</p>
+        </header>
+
+        <div class="upload-section" id="dropZone">
+            <div class="upload-icon">📁</div>
+            <p class="upload-text">Drag and drop PLY file here</p>
+            <p class="upload-hint">Or click button to select file</p>
+            <input type="file" id="fileInput" class="file-input" accept=".ply">
+            <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                Select PLY File
+            </button>
+
+            <!-- New: Online PLY URL Input -->
+            <div class="url-input">
+                <input type="url" id="urlInput" class="url-field" placeholder="Paste online PLY URL, e.g. https://v3b.fal.media/files/.../file.ply">
+                <button class="upload-btn" id="loadUrlBtn">Load URL</button>
+                <!-- Optional: Proxy prefix to bypass CORS (leave empty for direct connection) -->
+                <input type="text" id="proxyInput" class="proxy-field" placeholder="Optional proxy prefix, e.g. https://cors.isomorphic-git.org/">
+                <div class="proxy-hint">Some sites do not allow CORS, fill in proxy prefix to bypass (use at your own risk).</div>
+            </div>
+        </div>
+
+        <div class="viewer-section">
+            <div id="canvas-container">
+                <div class="placeholder-text" id="placeholder">
+                    <p>📊 Waiting for point cloud data</p>
+                    <span>Upload PLY file to start viewing</span>
+                </div>
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                    <p id="loadingText">Loading point cloud...</p>
+                </div>
+            </div>
+            
+            <div class="point-size-control" id="pointSizeControl" style="display: none;">
+                <label>Point Size: <span id="pointSizeValue">3</span></label>
+                <input type="range" id="pointSize" min="1" max="10" step="0.5" value="3">
+            </div>
+
+            <div class="controls" id="viewControls" style="display: none;">
+                <button class="control-btn" onclick="resetCamera()">Reset Camera</button>
+                <button class="control-btn" onclick="toggleAutoRotate()">Auto Rotate</button>
+            </div>
+
+            <div class="info-panel" id="infoPanel" style="display: none;">
+                <p>Filename: <span id="fileName">-</span></p>
+                <p>Point Count: <span id="pointCount">-</span></p>
+                <p>File Size: <span id="fileSize">-</span></p>
+            </div>
+        </div>
+
+        <footer>
+            <p>Left click to rotate | Scroll to zoom | Right click to pan</p>
+        </footer>
+    </div>
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        // 全局变量
+        let scene, camera, renderer, controls, pointCloud;
+        let autoRotate = false;
+
+        // 自定义 PLY 解析器，支持颜色
+        function parsePLY(data) {
+            const result = { vertices: null, colors: null };
+
+            const dv = new DataView(data);
+            const dec = new TextDecoder('ascii');
+
+            // 寻找头部
+            const headText = dec.decode(new Uint8Array(data, 0, Math.min(data.byteLength, 8192)));
+            const endIdx = headText.indexOf('end_header');
+            if (endIdx === -1) throw new Error('Invalid PLY header: end_header not found');
+            let headerEnd = endIdx + 'end_header'.length;
+            // 跳过换行
+            while (headerEnd < data.byteLength) {
+                const b = dv.getUint8(headerEnd);
+                if (b === 10 || b === 13) headerEnd++;
+                else break;
+            }
+            const header = headText.substring(0, endIdx);
+            const lines = header.split('\n').map(l => l.trim()).filter(Boolean);
+
+            // 解析头部信息
+            let isBinary = false;
+            let little = true;
+            let vertexCount = 0;
+            const properties = [];
+            let inVertex = false;
+
+            for (const line of lines) {
+                if (line.startsWith('format ascii')) {
+                    isBinary = false;
+                } else if (line.startsWith('format binary_little_endian')) {
+                    isBinary = true; little = true;
+                } else if (line.startsWith('format binary_big_endian')) {
+                    isBinary = true; little = false;
+                } else if (line.startsWith('element vertex')) {
+                    vertexCount = parseInt(line.split(/\s+/)[2]) || 0;
+                    inVertex = true;
+                } else if (line.startsWith('element ')) {
+                    inVertex = false;
+                } else if (inVertex && line.startsWith('property')) {
+                    // property float x | property uchar red | property float f_dc_0 ...
+                    const parts = line.split(/\s+/);
+                    // list 属性只出现在非 vertex 元素，此处可忽略
+                    if (parts[1] === 'list') continue;
+                    const type = parts[1];
+                    const name = parts[2];
+                    properties.push({ type, name });
+                }
+            }
+
+            if (!vertexCount) throw new Error('Vertex count not found');
+            const propIndex = {};
+            properties.forEach((p, i) => propIndex[p.name] = i);
+
+            // 需要的属性索引
+            const xIdx = propIndex.x ?? propIndex.X;
+            const yIdx = propIndex.y ?? propIndex.Y;
+            const zIdx = propIndex.z ?? propIndex.Z;
+
+            const hasSH = propIndex.f_dc_0 !== undefined && propIndex.f_dc_1 !== undefined && propIndex.f_dc_2 !== undefined;
+            const rIdx = propIndex.red ?? propIndex.r ?? propIndex.diffuse_red ?? propIndex.color_red;
+            const gIdx = propIndex.green ?? propIndex.g ?? propIndex.diffuse_green ?? propIndex.color_green;
+            const bIdx = propIndex.blue ?? propIndex.b ?? propIndex.diffuse_blue ?? propIndex.color_blue;
+
+            const hasRGB = rIdx !== undefined && gIdx !== undefined && bIdx !== undefined;
+            const hasColor = hasSH || hasRGB;
+
+            // 颜色属性类型（用于归一化）
+            const rType = (rIdx !== undefined) ? properties[rIdx].type : null;
+            const gType = (gIdx !== undefined) ? properties[gIdx].type : null;
+            const bType = (bIdx !== undefined) ? properties[bIdx].type : null;
+            const needs255 = (t) => t === 'uchar' || t === 'uint8';
+
+            const SH_C0 = 0.28209479177387814;
+
+            if (isBinary) {
+                // 预分配
+                const positions = new Float32Array(vertexCount * 3);
+                const colors = hasColor ? new Float32Array(vertexCount * 3) : null;
+
+                let offset = headerEnd;
+
+                // 读取函数
+                const read = (type) => {
+                    switch (type) {
+                        case 'float':
+                        case 'float32': { const v = dv.getFloat32(offset, little); offset += 4; return v; }
+                        case 'double':
+                        case 'float64': { const v = dv.getFloat64(offset, little); offset += 8; return v; }
+                        case 'int':
+                        case 'int32': { const v = dv.getInt32(offset, little); offset += 4; return v; }
+                        case 'uint':
+                        case 'uint32': { const v = dv.getUint32(offset, little); offset += 4; return v; }
+                        case 'short':
+                        case 'int16': { const v = dv.getInt16(offset, little); offset += 2; return v; }
+                        case 'ushort':
+                        case 'uint16': { const v = dv.getUint16(offset, little); offset += 2; return v; }
+                        case 'char':
+                        case 'int8': { const v = dv.getInt8(offset); offset += 1; return v; }
+                        case 'uchar':
+                        case 'uint8': { const v = dv.getUint8(offset); offset += 1; return v; }
+                        default: { const v = dv.getFloat32(offset, little); offset += 4; return v; }
+                    }
+                };
+
+                for (let i = 0; i < vertexCount; i++) {
+                    let vx = 0, vy = 0, vz = 0;
+                    let r = 1, g = 1, b = 1;
+                    let f0, f1, f2;
+
+                    for (let p = 0; p < properties.length; p++) {
+                        const prop = properties[p];
+                        const val = read(prop.type);
+
+                        if (p === xIdx) vx = val;
+                        else if (p === yIdx) vy = val;
+                        else if (p === zIdx) vz = val;
+
+                        if (hasSH) {
+                            if (p === propIndex.f_dc_0) f0 = val;
+                            else if (p === propIndex.f_dc_1) f1 = val;
+                            else if (p === propIndex.f_dc_2) f2 = val;
+                        } else if (hasRGB) {
+                            if (p === rIdx) r = val;
+                            else if (p === gIdx) g = val;
+                            else if (p === bIdx) b = val;
+                        }
+                    }
+
+                    const pi = i * 3;
+                    positions[pi] = vx;
+                    positions[pi + 1] = vy;
+                    positions[pi + 2] = vz;
+
+                    if (colors) {
+                        if (hasSH) {
+                            r = Math.min(1, Math.max(0, 0.5 + SH_C0 * (f0 ?? 0)));
+                            g = Math.min(1, Math.max(0, 0.5 + SH_C0 * (f1 ?? 0)));
+                            b = Math.min(1, Math.max(0, 0.5 + SH_C0 * (f2 ?? 0)));
+                        } else if (hasRGB) {
+                            if (needs255(rType)) r = r / 255;
+                            if (needs255(gType)) g = g / 255;
+                            if (needs255(bType)) b = b / 255;
+                            // 容错
+                            if (r > 1 || g > 1 || b > 1) { r /= 255; g /= 255; b /= 255; }
+                        }
+                        colors[pi] = r;
+                        colors[pi + 1] = g;
+                        colors[pi + 2] = b;
+                    }
+                }
+
+                result.vertices = positions;
+                if (colors) result.colors = colors;
+            } else {
+                // ASCII
+                const bodyText = dec.decode(new Uint8Array(data, headerEnd));
+                const bodyLines = bodyText.trim().split('\n');
+                const n = Math.min(vertexCount, bodyLines.length);
+
+                const positions = new Float32Array(n * 3);
+                const colors = hasColor ? new Float32Array(n * 3) : null;
+
+                for (let i = 0; i < n; i++) {
+                    const vals = bodyLines[i].trim().split(/\s+/).map(parseFloat);
+
+                    const vx = (xIdx !== undefined) ? vals[xIdx] : 0;
+                    const vy = (yIdx !== undefined) ? vals[yIdx] : 0;
+                    const vz = (zIdx !== undefined) ? vals[zIdx] : 0;
+
+                    const pi = i * 3;
+                    positions[pi] = vx;
+                    positions[pi + 1] = vy;
+                    positions[pi + 2] = vz;
+
+                    if (colors) {
+                        let r, g, b;
+                        if (hasSH) {
+                            const f0 = vals[propIndex.f_dc_0], f1 = vals[propIndex.f_dc_1], f2 = vals[propIndex.f_dc_2];
+                            r = Math.min(1, Math.max(0, 0.5 + SH_C0 * f0));
+                            g = Math.min(1, Math.max(0, 0.5 + SH_C0 * f1));
+                            b = Math.min(1, Math.max(0, 0.5 + SH_C0 * f2));
+                        } else {
+                            r = vals[rIdx]; g = vals[gIdx]; b = vals[bIdx];
+                            if (r > 1 || g > 1 || b > 1) { r /= 255; g /= 255; b /= 255; }
+                        }
+                        colors[pi] = r;
+                        colors[pi + 1] = g;
+                        colors[pi + 2] = b;
+                    }
+                }
+
+                result.vertices = positions;
+                if (colors) result.colors = colors;
+            }
+
+            console.log('Parsed PLY fast:', {
+                vertexCount: result.vertices.length / 3,
+                hasColors: !!result.colors
+            });
+            return result;
+        }
+
+        // 初始化 Three.js 场景
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+            
+            // 创建场景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2e);
+
+            // 创建相机
+            camera = new THREE.PerspectiveCamera(
+                60,
+                container.clientWidth / container.clientHeight,
+                0.1,
+                1000
+            );
+            camera.position.set(0, 0, 5);
+
+            // 创建渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // 创建控制器
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = true;
+            controls.minDistance = 0.1;
+            controls.maxDistance = 100;
+
+            // 添加环境光
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            // 添加方向光
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
+
+            // 添加网格辅助线
+            const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x333333);
+            scene.add(gridHelper);
+
+            // 响应窗口大小变化
+            window.addEventListener('resize', onWindowResize);
+
+            // 开始动画循环
+            animate();
+        }
+
+        // 窗口大小变化处理
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (autoRotate && pointCloud) {
+                pointCloud.rotation.y += 0.005;
+            }
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // 统一的加载提示开关，避免遗漏
+        function showLoading(text) {
+            const el = document.getElementById('loading');
+            const txt = document.getElementById('loadingText');
+            if (text) txt.textContent = text;
+            el.classList.add('active');
+            document.body.style.cursor = 'progress';
+        }
+
+        function hideLoading() {
+            const el = document.getElementById('loading');
+            el.classList.remove('active');
+            document.body.style.cursor = 'default';
+        }
+
+        // 共享渲染函数：解析并渲染 PLY（本地与在线复用）
+        function handleArrayBuffer(contents, fileNameText, fileSizeBytes) {
+            const plyData = parsePLY(contents);
+
+            if (pointCloud) {
+                scene.remove(pointCloud);
+                pointCloud.geometry.dispose();
+                pointCloud.material.dispose();
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(plyData.vertices, 3));
+
+            const sizePx = parseFloat(document.getElementById('pointSize').value) || 3;
+            let material;
+
+            if (plyData.colors && plyData.colors.length) {
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(plyData.colors, 3));
+                material = new THREE.PointsMaterial({
+                    size: sizePx,
+                    vertexColors: true,
+                    sizeAttenuation: false
+                });
+            } else {
+                // 生成默认渐变色
+                const colors = [];
+                const positions = plyData.vertices;
+                const count = positions.length / 3;
+                let minY = Infinity, maxY = -Infinity;
+                for (let i = 0; i < count; i++) {
+                    const y = positions[i * 3 + 1];
+                    minY = Math.min(minY, y);
+                    maxY = Math.max(maxY, y);
+                }
+                for (let i = 0; i < count; i++) {
+                    const y = positions[i * 3 + 1];
+                    const t = (y - minY) / (maxY - minY || 1);
+                    const r = Math.sin(t * Math.PI) * 0.5 + 0.5;
+                    const g = Math.sin(t * Math.PI + 2) * 0.5 + 0.5;
+                    const b = Math.sin(t * Math.PI + 4) * 0.5 + 0.5;
+                    colors.push(r, g, b);
+                }
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                material = new THREE.PointsMaterial({
+                    size: sizePx,
+                    vertexColors: true,
+                    sizeAttenuation: false
+                });
+            }
+
+            pointCloud = new THREE.Points(geometry, material);
+
+            // 居中点云并调整相机
+            geometry.computeBoundingBox();
+            const center = new THREE.Vector3();
+            geometry.boundingBox.getCenter(center);
+            pointCloud.position.sub(center);
+
+            const size = new THREE.Vector3();
+            geometry.boundingBox.getSize(size);
+            const maxDim = Math.max(size.x, size.y, size.z);
+            camera.position.set(0, maxDim * 0.5, maxDim * 1.5);
+            controls.target.set(0, 0, 0);
+            controls.update();
+
+            scene.add(pointCloud);
+
+            // 更新信息面板
+            const pointCount = geometry.attributes.position.count;
+            document.getElementById('fileName').textContent = fileNameText;
+            document.getElementById('pointCount').textContent = pointCount.toLocaleString();
+            if (typeof fileSizeBytes === 'number' && !Number.isNaN(fileSizeBytes)) {
+                document.getElementById('fileSize').textContent = formatFileSize(fileSizeBytes);
+            } else {
+                document.getElementById('fileSize').textContent = '-';
+            }
+
+            // 显示控制面板
+            document.getElementById('infoPanel').style.display = 'block';
+            document.getElementById('viewControls').style.display = 'flex';
+            document.getElementById('pointSizeControl').style.display = 'block';
+
+            // 确保首帧渲染后隐藏加载提示（即使上层遗漏也能隐藏）
+            requestAnimationFrame(() => hideLoading());
+        }
+
+        // 解析 PLY 文件（本地）
+        function loadPLYFile(file) {
+            const reader = new FileReader();
+
+            showLoading('Loading point cloud...'); // 替代直接操作 class
+            document.getElementById('placeholder').style.display = 'none';
+
+            reader.onload = function(event) {
+                try {
+                    const contents = event.target.result;
+                    handleArrayBuffer(contents, file.name, file.size);
+                } catch (error) {
+                    console.error('Failed to load PLY file:', error);
+                    alert('Failed to load PLY file, please ensure the file format is correct.');
+                    document.getElementById('placeholder').style.display = 'block';
+                } finally {
+                    hideLoading();
+                }
+            };
+
+            reader.onerror = function() {
+                alert('Failed to read file');
+                document.getElementById('placeholder').style.display = 'block';
+                hideLoading();
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        // 新增：解析 PLY（在线 URL）
+        async function loadPLYFromURL(url) {
+            showLoading('Downloading point cloud...');
+            document.getElementById('placeholder').style.display = 'none';
+
+            const proxy = (document.getElementById('proxyInput').value || '').trim();
+            const finalUrl = proxy ? (proxy + url) : url;
+
+            const controller = new AbortController();
+            const timeoutMs = 1200000; // 120s 超时
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+            try {
+                // 先尝试带 CORS，再回退默认（某些代理不需声明）
+                let res = await fetch(finalUrl, { mode: 'cors', signal: controller.signal });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+                const contentLength = Number(res.headers.get('content-length')) || 0;
+
+                // 流式读取显示进度（如果支持）
+                if (res.body && window.ReadableStream) {
+                    const reader = res.body.getReader();
+                    const chunks = [];
+                    let received = 0;
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        chunks.push(value);
+                        received += value.byteLength;
+                        if (contentLength) {
+                            const pct = Math.min(100, Math.round((received / contentLength) * 100));
+                            showLoading(`Downloading point cloud... ${pct}% (${formatFileSize(received)}/${formatFileSize(contentLength)})`);
+                        } else {
+                            showLoading(`Downloading point cloud... ${formatFileSize(received)}`);
+                        }
+                    }
+
+                    // 合并为单个 ArrayBuffer
+                    const total = received;
+                    const buffer = new Uint8Array(total);
+                    let offset = 0;
+                    for (const chunk of chunks) {
+                        buffer.set(chunk, offset);
+                        offset += chunk.byteLength;
+                    }
+
+                    const size = total;
+                    const name = url.split('/').pop() || url;
+                    showLoading('Parsing point cloud...');
+                    handleArrayBuffer(buffer.buffer, name, size);
+                } else {
+                    // 回退：直接 arrayBuffer（无进度）
+                    const buffer = await res.arrayBuffer();
+                    const size = Number(res.headers.get('content-length')) || buffer.byteLength;
+                    const name = url.split('/').pop() || url;
+                    showLoading('Parsing point cloud...');
+                    handleArrayBuffer(buffer, name, size);
+                }
+            } catch (err) {
+                console.error('Failed to load PLY URL:', err);
+                if (err.name === 'AbortError') {
+                    alert('Download timed out. Please retry or check network/CORS. Try using a proxy prefix.');
+                } else {
+                    alert('Failed to load PLY URL. Please check if the link is correct and allows CORS. Try using a proxy prefix.');
+                }
+                document.getElementById('placeholder').style.display = 'block';
+            } finally {
+                clearTimeout(timeout);
+                hideLoading();
+            }
+        }
+
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        // 重置相机
+        function resetCamera() {
+            if (pointCloud) {
+                const geometry = pointCloud.geometry;
+                geometry.computeBoundingBox();
+                const size = new THREE.Vector3();
+                geometry.boundingBox.getSize(size);
+                const maxDim = Math.max(size.x, size.y, size.z);
+                
+                camera.position.set(0, maxDim * 0.5, maxDim * 1.5);
+                controls.target.set(0, 0, 0);
+                controls.update();
+            }
+        }
+
+        // 切换自动旋转
+        function toggleAutoRotate() {
+            autoRotate = !autoRotate;
+        }
+
+        // 文件拖放处理
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.name.toLowerCase().endsWith('.ply')) {
+                    loadPLYFile(file);
+                } else {
+                    alert('Please upload a PLY file');
+                }
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) loadPLYFile(file);
+        });
+
+        // URL 加载事件
+        const urlInput = document.getElementById('urlInput');
+        const loadUrlBtn = document.getElementById('loadUrlBtn');
+        const proxyInput = document.getElementById('proxyInput');
+
+        loadUrlBtn.addEventListener('click', () => {
+            const url = (urlInput.value || '').trim();
+            if (!url) return alert('Please enter a valid PLY URL');
+            loadPLYFromURL(url);
+        });
+        urlInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const url = (urlInput.value || '').trim();
+                if (url) loadPLYFromURL(url);
+            }
+        });
+
+        // 点大小控制：直接使用像素值
+        document.getElementById('pointSize').addEventListener('input', (e) => {
+            const size = parseFloat(e.target.value);
+            document.getElementById('pointSizeValue').textContent = size;
+            if (pointCloud) {
+                pointCloud.material.size = size;
+            }
+        });
+
+        // 初始化场景
+        initScene();
+    </script>
+</body>
+</html>
